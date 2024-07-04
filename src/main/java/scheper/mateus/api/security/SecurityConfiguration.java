@@ -59,11 +59,13 @@ public class SecurityConfiguration {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.cors().and()
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/api/auth/login").anonymous()
-                        .requestMatchers("/api").permitAll()
-                        .anyRequest().authenticated()
+                        .requestMatchers("/auth/login").anonymous()
+                        .anyRequest().permitAll()
                 )
-                .csrf(csrf -> csrf.ignoringRequestMatchers("/api/auth/login"))
+                .csrf(csrf -> csrf
+                        .ignoringRequestMatchers("/api/auth/login")
+                        .ignoringRequestMatchers("/**")
+                )
                 .oauth2ResourceServer(OAuth2ResourceServerConfigurer::jwt)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(exceptions -> exceptions
