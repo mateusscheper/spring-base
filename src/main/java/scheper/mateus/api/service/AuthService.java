@@ -3,6 +3,7 @@ package scheper.mateus.api.service;
 import io.micrometer.common.util.StringUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -10,14 +11,22 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import scheper.mateus.api.dto.LoginDTO;
+import scheper.mateus.api.dto.RegisterDTO;
 import scheper.mateus.api.entity.Role;
 import scheper.mateus.api.entity.User;
 import scheper.mateus.api.exception.BusinessException;
 import scheper.mateus.api.repository.AuthRepository;
 
 import java.time.Instant;
-import java.util.List;
+
+import static scheper.mateus.api.constant.Messages.AUTHORIZATION_HEADER_IS_MISSING;
+import static scheper.mateus.api.constant.Messages.EMAIL_ALREADY_REGISTERED;
+import static scheper.mateus.api.constant.Messages.TOKEN_IS_EXPIRED;
 
 @Service
 public class AuthService {
@@ -30,14 +39,17 @@ public class AuthService {
 
     private final JwtDecoder jwtDecoder;
 
+    private final RedisService redisService;
+
     @Value("${jwt.expiration}")
     private Long expiration;
 
-    public AuthService(AuthRepository authRepository, JwtEncoder encoder, PasswordEncoder passwordEncoder, JwtDecoder jwtDecoder) {
+    public AuthService(AuthRepository authRepository, JwtEncoder encoder, PasswordEncoder passwordEncoder, JwtDecoder jwtDecoder, RedisService redisService) {
         this.authRepository = authRepository;
         this.encoder = encoder;
         this.passwordEncoder = passwordEncoder;
         this.jwtDecoder = jwtDecoder;
+        this.redisService = redisService;
     }
 
     public String login(LoginDTO loginDTO) {
@@ -67,60 +79,59 @@ public class AuthService {
         return encoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
     }
 
+    public void logout() {
+        Jwt jwt = getJwtFromRequest(getHttpServletRequest());
+        redisService.blackListJwt(jwt.getTokenValue());
+    }
+
     private boolean passwordMatches(String sentPassword, String databasePassword) {
         return passwordEncoder.matches(sentPassword, databasePassword);
     }
 
-    public User getUserFromJwt(HttpServletRequest httpRequest) {
-        String email = getEmailFromJwt(httpRequest);
-        if (StringUtils.isBlank(email)) {
-            throw new BusinessException("Invalid user.");
+    private HttpServletRequest getHttpServletRequest() {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes)) {
+            return null;
         }
-
-        User user = getUserByEmail(email);
-        if (user == null) {
-            throw new BusinessException("Invalid user.");
-        }
-
-        return user;
-    }
-
-    public String getEmailFromJwt(HttpServletRequest httpRequest) {
-        Jwt jwt = getJwtFromRequest(httpRequest);
-        return jwt.getSubject();
+        return ((ServletRequestAttributes) requestAttributes).getRequest();
     }
 
     private Jwt getJwtFromRequest(HttpServletRequest httpRequest) {
-        String authorization = httpRequest.getHeader("Authorization");
-        if (StringUtils.isBlank(authorization)) {
-            throw new BusinessException("Authorization header is missing.");
-        }
-        String token = authorization.replace("Bearer ", "");
+        String token = extractJwtToken(httpRequest);
         if (StringUtils.isBlank(token)) {
-            throw new BusinessException("Authorization header is missing.");
+            throw new AccessDeniedException(AUTHORIZATION_HEADER_IS_MISSING);
         }
+
         Jwt jwt = jwtDecoder.decode(token);
-        Instant jwtExpiration = jwt.getExpiresAt();
-        if (jwtExpiration == null || jwtExpiration.isBefore(Instant.now())) {
-            throw new BusinessException("Token is expired.");
+        String jwtBlackList = redisService.getJwtBlackList(jwt.getTokenValue());
+        if (jwtBlackList != null) {
+            throw new AccessDeniedException(TOKEN_IS_EXPIRED);
         }
+
         return jwt;
     }
 
-    public List<String> getRolesFromJwt(HttpServletRequest httpRequest) {
-        Jwt jwt = getJwtFromRequest(httpRequest);
-        return jwt.getClaimAsStringList("roles");
-    }
-
-    public User getUserByEmail(String email) {
-        if (StringUtils.isBlank(email)) {
-            return null;
+    private String extractJwtToken(HttpServletRequest httpRequest) {
+        String authorization = httpRequest.getHeader("Authorization");
+        if (StringUtils.isBlank(authorization)) {
+            throw new AccessDeniedException(AUTHORIZATION_HEADER_IS_MISSING);
         }
 
-        return authRepository.findByEmail(email).orElse(null);
+        return authorization.replace("Bearer ", "");
     }
 
-    public void validate(HttpServletRequest httpRequest) {
-        getJwtFromRequest(httpRequest);
+    @Transactional
+    public void register(RegisterDTO registerDTO) {
+        String email = registerDTO.getEmail().trim();
+        if (authRepository.findByEmail(email).isPresent()) {
+            throw new BusinessException(EMAIL_ALREADY_REGISTERED);
+        }
+
+        User user = new User();
+        user.setEmail(email);
+        user.setName(registerDTO.getName().trim());
+        user.setPassword(passwordEncoder.encode(registerDTO.getPassword()));
+
+        authRepository.persist(user);
     }
 }

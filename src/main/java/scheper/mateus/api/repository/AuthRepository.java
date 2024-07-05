@@ -26,4 +26,17 @@ public class AuthRepository extends BaseRepository {
             return Optional.empty();
         }
     }
+
+    public boolean isEmailAlreadyRegistered(String email) {
+        if (!StringUtils.isBlank(email)) {
+            return false;
+        }
+
+        return (boolean) entityManager.createNativeQuery("SELECT EXISTS(" +
+                        "SELECT 1 " +
+                        "FROM base.\"user\" " +
+                        "WHERE email = :email)")
+                .setParameter("email", email)
+                .getSingleResult();
+    }
 }

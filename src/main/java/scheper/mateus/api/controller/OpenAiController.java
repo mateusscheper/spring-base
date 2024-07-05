@@ -28,7 +28,6 @@ public class OpenAiController {
         return openAiService.query(query);
     }
 
-    // form-data
     @PostMapping(value = "/ingest", consumes = "multipart/form-data")
     @ResponseStatus(HttpStatus.CREATED)
     public void ingest(@RequestParam(value = "file", required = false) MultipartFile file) {
