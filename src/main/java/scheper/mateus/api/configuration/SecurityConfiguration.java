@@ -80,6 +80,7 @@ public class SecurityConfiguration {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.cors().and()
+                .requiresChannel(channel -> channel.anyRequest().requiresSecure())
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/auth/login").anonymous()
                         .requestMatchers("/auth/register").anonymous()
