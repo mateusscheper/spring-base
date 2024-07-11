@@ -19,13 +19,13 @@ import scheper.mateus.api.dto.LoginDTO;
 import scheper.mateus.api.dto.RegisterDTO;
 import scheper.mateus.api.entity.Role;
 import scheper.mateus.api.entity.User;
+import scheper.mateus.api.enums.ProviderEnum;
 import scheper.mateus.api.exception.BusinessException;
 import scheper.mateus.api.repository.AuthRepository;
 
 import java.time.Instant;
 
 import static scheper.mateus.api.constant.Messages.AUTHORIZATION_HEADER_IS_MISSING;
-import static scheper.mateus.api.constant.Messages.EMAIL_ALREADY_REGISTERED;
 import static scheper.mateus.api.constant.Messages.TOKEN_IS_EXPIRED;
 
 @Service
@@ -40,21 +40,23 @@ public class AuthService {
     private final JwtDecoder jwtDecoder;
 
     private final RedisService redisService;
+    private final UserService userService;
 
     @Value("${jwt.expiration}")
     private Long expiration;
 
-    public AuthService(AuthRepository authRepository, JwtEncoder encoder, PasswordEncoder passwordEncoder, JwtDecoder jwtDecoder, RedisService redisService) {
+    public AuthService(AuthRepository authRepository, JwtEncoder encoder, PasswordEncoder passwordEncoder, JwtDecoder jwtDecoder, RedisService redisService, UserService userService) {
         this.authRepository = authRepository;
         this.encoder = encoder;
         this.passwordEncoder = passwordEncoder;
         this.jwtDecoder = jwtDecoder;
         this.redisService = redisService;
+        this.userService = userService;
     }
 
     public String login(LoginDTO loginDTO) {
         String errorMessage = "Invalid e-mail or password.";
-        User user = authRepository.findByEmail(loginDTO.getEmail())
+        User user = authRepository.findByEmailAndProvider(loginDTO.getEmail(), ProviderEnum.LOCAL)
                 .orElseThrow(() -> new BusinessException(errorMessage));
 
         if (!passwordMatches(loginDTO.getPassword(), user.getPassword())) {
@@ -67,7 +69,7 @@ public class AuthService {
                 .issuer("self")
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(expiration))
-                .subject(user.getEmail())
+                .subject(user.getLocalEmail())
                 .claim("name", user.getName())
                 .claim("roles", user
                         .getRoles()
@@ -123,15 +125,9 @@ public class AuthService {
     @Transactional
     public void register(RegisterDTO registerDTO) {
         String email = registerDTO.getEmail().trim();
-        if (authRepository.findByEmail(email).isPresent()) {
-            throw new BusinessException(EMAIL_ALREADY_REGISTERED);
-        }
-
-        User user = new User();
-        user.setEmail(email);
-        user.setName(registerDTO.getName().trim());
-        user.setPassword(passwordEncoder.encode(registerDTO.getPassword()));
-
-        authRepository.persist(user);
+        String password = passwordEncoder.encode(registerDTO.getPassword());
+        userService.registerUser(registerDTO.getName().trim(), email, password, ProviderEnum.LOCAL, null);
     }
+
+
 }

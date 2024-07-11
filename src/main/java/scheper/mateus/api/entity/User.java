@@ -9,10 +9,12 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
+import jakarta.persistence.OneToMany;
 import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
+import scheper.mateus.api.enums.ProviderEnum;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,12 +35,6 @@ public class User {
     @Column(nullable = false, length = 120)
     private String name;
 
-    @Column(nullable = false, unique = true, length = 100)
-    private String email;
-
-    @Column(nullable = false, length = 100)
-    private String password;
-
     private boolean active = true;
 
     @ManyToMany(fetch = FetchType.LAZY)
@@ -47,9 +43,30 @@ public class User {
             inverseJoinColumns = @JoinColumn(name = "id_role"))
     private List<Role> roles = new ArrayList<>();
 
-    public boolean isAdministrator() {
-        return roles
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
+    private List<UserInformation> userInformations = new ArrayList<>();
+
+    public String getLocalEmail() {
+        return userInformations
                 .stream()
-                .anyMatch(r -> r.getName().equals("Administrator"));
+                .filter(provider -> provider.getProvider().equals(ProviderEnum.LOCAL))
+                .findFirst()
+                .map(UserInformation::getEmail)
+                .orElse(null);
+    }
+
+    public String getPassword() {
+        return userInformations
+                .stream()
+                .filter(provider -> provider.getProvider().equals(ProviderEnum.LOCAL))
+                .findFirst()
+                .map(UserInformation::getPassword)
+                .orElse(null);
+    }
+
+    public boolean hasLocalInformation() {
+        return userInformations
+                .stream()
+                .anyMatch(provider -> provider.getProvider().equals(ProviderEnum.LOCAL));
     }
 }
