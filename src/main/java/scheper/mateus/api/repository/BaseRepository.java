@@ -43,4 +43,8 @@ public class BaseRepository {
     public <T> void persist(T entity) {
         entityManager.persist(entity);
     }
+
+    public <T> T merge(T entity) {
+        return entityManager.merge(entity);
+    }
 }

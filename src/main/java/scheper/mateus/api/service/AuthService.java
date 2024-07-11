@@ -2,14 +2,10 @@ package scheper.mateus.api.service;
 
 import io.micrometer.common.util.StringUtils;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestAttributes;
@@ -17,12 +13,10 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import scheper.mateus.api.dto.LoginDTO;
 import scheper.mateus.api.dto.RegisterDTO;
-import scheper.mateus.api.entity.Role;
 import scheper.mateus.api.entity.User;
+import scheper.mateus.api.enums.SocialProviderEnum;
 import scheper.mateus.api.exception.BusinessException;
 import scheper.mateus.api.repository.AuthRepository;
-
-import java.time.Instant;
 
 import static scheper.mateus.api.constant.Messages.AUTHORIZATION_HEADER_IS_MISSING;
 import static scheper.mateus.api.constant.Messages.EMAIL_ALREADY_REGISTERED;
@@ -33,23 +27,20 @@ public class AuthService {
 
     private final AuthRepository authRepository;
 
-    private final JwtEncoder encoder;
+    private final JwtDecoder jwtDecoder;
 
     private final PasswordEncoder passwordEncoder;
 
-    private final JwtDecoder jwtDecoder;
-
     private final RedisService redisService;
 
-    @Value("${jwt.expiration}")
-    private Long expiration;
+    private final JwtService jwtService;
 
-    public AuthService(AuthRepository authRepository, JwtEncoder encoder, PasswordEncoder passwordEncoder, JwtDecoder jwtDecoder, RedisService redisService) {
+    public AuthService(AuthRepository authRepository, JwtDecoder jwtDecoder, PasswordEncoder passwordEncoder, RedisService redisService, JwtService jwtService) {
         this.authRepository = authRepository;
-        this.encoder = encoder;
-        this.passwordEncoder = passwordEncoder;
         this.jwtDecoder = jwtDecoder;
+        this.passwordEncoder = passwordEncoder;
         this.redisService = redisService;
+        this.jwtService = jwtService;
     }
 
     public String login(LoginDTO loginDTO) {
@@ -61,22 +52,7 @@ public class AuthService {
             throw new BusinessException(errorMessage);
         }
 
-        Instant now = Instant.now();
-
-        JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer("self")
-                .issuedAt(now)
-                .expiresAt(now.plusSeconds(expiration))
-                .subject(user.getEmail())
-                .claim("name", user.getName())
-                .claim("roles", user
-                        .getRoles()
-                        .stream()
-                        .map(Role::getName)
-                        .toList())
-                .build();
-
-        return encoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
+        return jwtService.generateJwt(user, SocialProviderEnum.LOCAL.getProviderType());
     }
 
     public void logout() {
@@ -86,6 +62,10 @@ public class AuthService {
 
     private boolean passwordMatches(String sentPassword, String databasePassword) {
         return passwordEncoder.matches(sentPassword, databasePassword);
+    }
+
+    public String encodePassword(String password) {
+        return passwordEncoder.encode(password);
     }
 
     private HttpServletRequest getHttpServletRequest() {
@@ -130,7 +110,7 @@ public class AuthService {
         User user = new User();
         user.setEmail(email);
         user.setName(registerDTO.getName().trim());
-        user.setPassword(passwordEncoder.encode(registerDTO.getPassword()));
+        user.setPassword(encodePassword(registerDTO.getPassword()));
 
         authRepository.persist(user);
     }
